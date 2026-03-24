@@ -1,0 +1,29 @@
+# 小红书直播流捕获器依赖
+
+# HTTP请求
+requests>=2.31.0
+httpx>=0.25.0
+
+# 音频处理
+pydub>=0.25.1
+
+# 语音识别 - OpenAI Whisper (本地运行，支持中文)
+openai-whisper>=20231117
+
+# 或者使用在线API（可选）
+# volcengine-python-sdk  # 火山引擎语音识别
+# aliyun-nls  # 阿里云语音识别
+
+# FFmpeg进程管理
+ffmpeg-python>=0.2.0
+
+# UI界面（可选）
+# tkinter  # Python内置
+
+# 日志和配置
+pyyaml>=6.0.1
+colorama>=0.4.6
+
+# Chrome CDP 支持
+websocket-client>=1.6.0
+selenium>=4.15.0

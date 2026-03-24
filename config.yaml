@@ -1,0 +1,78 @@
+# 小红书直播流捕获器配置文件
+
+# 短链接转换配置
+short_link:
+  # 请求超时时间（秒）
+  timeout: 10
+  # 最大重定向次数
+  max_redirects: 5
+  # 请求头
+  headers:
+    User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+    Accept-Language: "zh-CN,zh;q=0.9,en;q=0.8"
+
+# 直播流配置
+stream:
+  # 音频采样率
+  sample_rate: 16000
+  # 音频通道数
+  channels: 1
+  # 音频缓冲区大小（秒）
+  buffer_size: 5
+  # FLV流请求超时
+  flv_timeout: 30
+  # 断线重连间隔（秒）
+  reconnect_interval: 3
+  # 最大重连次数
+  max_reconnect_attempts: 10
+
+# 语音识别配置
+speech_recognition:
+  # 识别引擎: whisper, azure, aliyun, volcengine
+  engine: "whisper"
+  
+  # Whisper配置（本地运行）
+  whisper:
+    # 模型大小: tiny, base, small, medium, large
+    # tiny最快但准确率较低，large最准但需要更多资源
+    model: "base"
+    # 语言
+    language: "zh"
+    # 设备: cuda, cpu
+    device: "cpu"
+  
+  # Azure语音服务配置（可选）
+  azure:
+    subscription_key: ""
+    region: "eastasia"
+  
+  # 阿里云语音服务配置（可选）
+  aliyun:
+    access_key_id: ""
+    access_key_secret: ""
+    app_key: ""
+  
+  # 火山引擎语音服务配置（可选）
+  volcengine:
+    access_key: ""
+    secret_key: ""
+    app_key: ""
+
+# 输出配置
+output:
+  # 保存目录
+  save_dir: "./output"
+  # 保存音频文件
+  save_audio: true
+  # 保存识别文本
+  save_text: true
+  # 文本输出格式
+  text_format: "txt"  # txt, json, srt
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  # 日志文件路径（留空则不保存到文件）
+  file: ""

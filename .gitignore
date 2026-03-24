@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 输出文件
+output/
+*.raw
+*.wav
+*.mp3
+*.flv
+*.ts
+
+# 日志
+*.log
+logs/
+
+# 配置（可能包含敏感信息）
+# config.yaml  # 取消注释以忽略配置文件
+
+# 模型缓存
+.cache/
+models/
+*.pt
+*.bin
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 打包
+dist/
+build/
+*.egg-info/
+
+/chrome_temp_profile
