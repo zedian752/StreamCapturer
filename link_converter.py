@@ -23,6 +23,7 @@ class LinkConverter:
         })
         self.chrome_process = None
         self.ws = None
+        self._last_long_url = None  # 保存最后一次转换的长链接
     
     def convert_short_url(self, short_url: str) -> Tuple[Optional[str], Optional[str]]:
         """
@@ -59,12 +60,13 @@ class LinkConverter:
             return match.group(1)
         return None
     
-    def get_stream_url_via_cdp(self, room_id: str, wait_time: int = 15) -> Optional[str]:
+    def get_stream_url_via_cdp(self, room_id: str, live_url: str = None, wait_time: int = 20) -> Optional[str]:
         """
         使用Chrome CDP获取直播流地址
         
         Args:
             room_id: 直播间ID
+            live_url: 直播间完整URL（可选，如果不提供则构造）
             wait_time: 等待页面加载时间（秒）
             
         Returns:
@@ -88,14 +90,13 @@ class LinkConverter:
             user_data_dir = r"d:\xhs_stream_capturer\chrome_temp_profile"
             os.makedirs(user_data_dir, exist_ok=True)
             
+            # 不使用headless模式，因为小红书可能检测headless
             cmd = [
                 chrome_exe,
                 f"--remote-debugging-port={port}",
                 f"--user-data-dir={user_data_dir}",
                 "--no-first-run",
                 "--no-default-browser-check",
-                "--headless",
-                "--disable-gpu",
                 "--window-size=1920,1080",
                 "--remote-allow-origins=*",
             ]
@@ -128,8 +129,9 @@ class LinkConverter:
             self._send_command("Network.enable")
             self._send_command("Page.enable")
             
-            # 构造直播页面URL
-            live_url = f"https://www.xiaohongshu.com/livestream/room/{room_id}"
+            # 使用提供的URL或构造URL
+            if not live_url:
+                live_url = f"https://www.xiaohongshu.com/livestream/dynpath{room_id[-6:]}/{room_id}"
             print(f"访问直播间: {live_url}")
             self._send_command("Page.navigate", {"url": live_url})
             
@@ -138,6 +140,7 @@ class LinkConverter:
             self.ws.settimeout(1)
             start_time = time.time()
             stream_url = None
+            request_urls = {}
             
             while time.time() - start_time < wait_time:
                 try:
@@ -149,6 +152,8 @@ class LinkConverter:
                         if method == "Network.requestWillBeSent":
                             request = data.get("params", {}).get("request", {})
                             request_url = request.get("url", "")
+                            request_id = data.get("params", {}).get("requestId", "")
+                            request_urls[request_id] = request_url
                             
                             # 检查是否是直播流URL
                             if 'live-source-play.xhscdn.com' in request_url and '.flv' in request_url:
@@ -165,6 +170,8 @@ class LinkConverter:
             
         except Exception as e:
             print(f"CDP捕获失败: {e}")
+            import traceback
+            traceback.print_exc()
             return None
         finally:
             self._cleanup()

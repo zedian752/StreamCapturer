@@ -46,25 +46,51 @@ pip install -r requirements.txt
 
 ## 使用方法
 
-### 基本用法
+### 推荐方式：先获取流地址，配置后运行
+
+**第一步：获取直播流地址**
+
+运行网络捕获工具，获取直播流URL：
 
 ```bash
-# 使用短链接
+# 修改 capture_network_cdp.py 中的 test_url 为短链接
+python capture_network_cdp.py
+
+# 输出中会显示捕获到的直播流地址：
+# 找到直播流: https://live-source-play.xhscdn.com/live/570200729166651969_hcv5402.flv?userId=xxx
+```
+
+**第二步：配置流地址**
+
+编辑 `config.yaml`，填入获取到的流地址：
+
+```yaml
+# 取消注释并填入实际地址
+stream_url: "https://live-source-play.xhscdn.com/live/570200729166651969_hcv5402.flv?userId=xxx"
+room_id: "570200729166651969"
+```
+
+**第三步：运行主程序**
+
+```bash
+python main.py -c config.yaml
+```
+
+这样每次运行时跳过CDP获取步骤，启动更快更稳定！
+
+### 其他使用方式
+
+```bash
+# 直接指定流URL（跳过链接解析）
+python main.py -s "https://live-source-play.xhscdn.com/live/xxx.flv?userId=xxx"
+
+# 使用短链接（会自动启动Chrome获取流地址）
 python main.py http://xhslink.com/m/AZKB2inRqtk
 
 # 使用完整直播间链接
 python main.py https://www.xiaohongshu.com/livestream/dynpathkeF6dmRm/570200151527099270
-```
 
-### 使用配置文件
-
-```bash
-python main.py -c config.yaml http://xhslink.com/xxx
-```
-
-### 详细日志模式
-
-```bash
+# 详细日志模式
 python main.py -v http://xhslink.com/xxx
 ```
 

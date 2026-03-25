@@ -207,9 +207,9 @@ class XHSLiveCapturer:
         self.logger.info(f"  房间ID: {room_id}")
         self.logger.info(f"  长链接: {long_url[:80]}..." if long_url else "  长链接: N/A")
         
-        # 使用CDP获取直播流地址
+        # 使用CDP获取直播流地址（传递完整的长链接）
         self.logger.info("正在获取直播流地址...")
-        stream_url = self._link_converter.get_stream_url_via_cdp(room_id, wait_time=15)
+        stream_url = self._link_converter.get_stream_url_via_cdp(room_id, live_url=long_url, wait_time=20)
         
         if stream_url:
             self._stream_info = {
@@ -437,13 +437,15 @@ def main():
         epilog='''
 示例:
     python main.py http://xhslink.com/m/AZKB2inRqtk
-    python main.py https://www.xiaohongshu.com/livestream/570200151527099270
+    python main.py -s "https://live-source-play.xhscdn.com/live/xxx.flv"
+    python main.py -c config.yaml
     python main.py -c config.yaml http://xhslink.com/xxx
         '''
     )
     
-    parser.add_argument('url', help='小红书直播间短链接或完整URL')
+    parser.add_argument('url', nargs='?', help='小红书直播间短链接或完整URL（可选）')
     parser.add_argument('-c', '--config', help='配置文件路径')
+    parser.add_argument('-s', '--stream-url', help='直接指定直播流URL（跳过链接解析）')
     parser.add_argument('-v', '--verbose', action='store_true', help='显示详细日志')
     
     args = parser.parse_args()
@@ -459,10 +461,58 @@ def main():
     capturer = XHSLiveCapturer(config)
     
     try:
-        # 启动
-        if not capturer.start(args.url):
-            print("启动失败")
+        # 方式1：直接使用流URL
+        if args.stream_url:
+            capturer.logger.info(f"使用直接指定的流URL: {args.stream_url[:80]}...")
+            capturer._init_components()
+            capturer._room_id = "direct"
+            capturer._stream_info = {'flv_url': args.stream_url}
+            capturer._setup_output("direct")
+            
+            # 启动流捕获
+            capturer.logger.info("正在启动流捕获...")
+            if not capturer._stream_capturer.start(capturer._stream_info):
+                print("启动流捕获失败")
+                sys.exit(1)
+            
+            # 启动语音识别
+            capturer.logger.info("正在启动语音识别...")
+            capturer._continuous_recognizer.start()
+            capturer._is_running = True
+            
+        # 方式2：从配置文件读取流URL
+        elif not args.url and config.get('stream_url'):
+            stream_url = config['stream_url']
+            capturer.logger.info(f"使用配置文件中的流URL: {stream_url[:80]}...")
+            capturer._init_components()
+            capturer._room_id = config.get('room_id', 'config')
+            capturer._stream_info = {'flv_url': stream_url}
+            capturer._setup_output(capturer._room_id)
+            
+            # 启动流捕获
+            capturer.logger.info("正在启动流捕获...")
+            if not capturer._stream_capturer.start(capturer._stream_info):
+                print("启动流捕获失败")
+                sys.exit(1)
+            
+            # 启动语音识别
+            capturer.logger.info("正在启动语音识别...")
+            capturer._continuous_recognizer.start()
+            capturer._is_running = True
+            
+        # 方式3：从短链接/直播间URL获取
+        elif args.url:
+            if not capturer.start(args.url):
+                print("启动失败")
+                sys.exit(1)
+        else:
+            parser.print_help()
+            print("\n错误: 请提供URL或使用 -s 指定流地址，或在配置文件中设置 stream_url")
             sys.exit(1)
+        
+        capturer.logger.info("=" * 50)
+        capturer.logger.info("捕获已启动，按 Ctrl+C 停止")
+        capturer.logger.info("=" * 50)
         
         # 等待用户中断
         while capturer.is_running:
@@ -472,6 +522,8 @@ def main():
         print("\n用户中断，正在停止...")
     except Exception as e:
         print(f"发生错误: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         capturer.stop()
         

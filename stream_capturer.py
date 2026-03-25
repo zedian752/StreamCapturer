@@ -57,7 +57,7 @@ class StreamCapturer:
         timeout: int = 30,
         reconnect_interval: int = 3,
         max_reconnect_attempts: int = 10,
-        ffmpeg_path: str = "ffmpeg"
+        ffmpeg_path: str = None
     ):
         """
         初始化捕获器
@@ -69,7 +69,7 @@ class StreamCapturer:
             timeout: 流请求超时时间
             reconnect_interval: 断线重连间隔
             max_reconnect_attempts: 最大重连次数
-            ffmpeg_path: FFmpeg可执行文件路径
+            ffmpeg_path: FFmpeg可执行文件路径（None则自动查找）
         """
         self.sample_rate = sample_rate
         self.channels = channels
@@ -77,7 +77,12 @@ class StreamCapturer:
         self.timeout = timeout
         self.reconnect_interval = reconnect_interval
         self.max_reconnect_attempts = max_reconnect_attempts
-        self.ffmpeg_path = ffmpeg_path
+        
+        # 自动查找ffmpeg
+        if ffmpeg_path:
+            self.ffmpeg_path = ffmpeg_path
+        else:
+            self.ffmpeg_path = self._find_ffmpeg()
         
         # 状态
         self._status = StreamStatus.IDLE
@@ -107,6 +112,24 @@ class StreamCapturer:
             'start_time': None,
             'last_chunk_time': None,
         }
+    
+    def _find_ffmpeg(self) -> str:
+        """查找FFmpeg可执行文件"""
+        # 1. 首先检查项目目录
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        local_ffmpeg = os.path.join(project_dir, 'ffmpeg.exe')
+        if os.path.exists(local_ffmpeg):
+            logger.info(f"使用本地FFmpeg: {local_ffmpeg}")
+            return local_ffmpeg
+        
+        # 2. 检查系统PATH
+        import shutil
+        ffmpeg_in_path = shutil.which('ffmpeg')
+        if ffmpeg_in_path:
+            return ffmpeg_in_path
+        
+        # 3. 返回默认值（会在后续报错）
+        return "ffmpeg"
     
     @property
     def status(self) -> StreamStatus:

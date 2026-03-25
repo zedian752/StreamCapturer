@@ -205,7 +205,7 @@ if __name__ == "__main__":
         subprocess.run(['d:\\xhs_stream_capturer\\venv\\Scripts\\pip', 'install', 'websocket-client'], check=True)
         import websocket
     
-    test_url = "https://www.xiaohongshu.com/livestream/dynpathhq6MrcXn/570200729166651969?timestamp=1774357252410&share_source=share_link&share_source_id=&source=share_out_of_app&host_id=661282a5000000000d02655b"
+    test_url = "http://xhslink.com/m/4pYathkBeeb"
     
     print("=" * 60)
     print("小红书直播网络请求捕获工具 (CDP模式)")
