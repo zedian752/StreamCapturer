@@ -60,170 +60,101 @@ class LinkConverter:
             return match.group(1)
         return None
     
-    def get_stream_url_via_cdp(self, room_id: str, live_url: str = None, wait_time: int = 20) -> Optional[str]:
+    def get_stream_url(self, room_id: str) -> Optional[str]:
         """
-        使用Chrome CDP获取直播流地址
+        获取直播流URL
+        
+        通过调用小红书直播API获取流地址
         
         Args:
             room_id: 直播间ID
-            live_url: 直播间完整URL（可选，如果不提供则构造）
-            wait_time: 等待页面加载时间（秒）
             
         Returns:
             直播流URL或None
         """
-        try:
-            import websocket
-        except ImportError:
-            print("请先安装websocket-client: pip install websocket-client")
-            return None
-        
-        port = 9223  # 使用不同端口避免冲突
-        
-        try:
-            # 启动Chrome
-            chrome_exe = self._find_chrome()
-            if not chrome_exe:
-                print("未找到Chrome浏览器")
-                return None
-            
-            user_data_dir = r"d:\xhs_stream_capturer\chrome_temp_profile"
-            os.makedirs(user_data_dir, exist_ok=True)
-            
-            # 不使用headless模式，因为小红书可能检测headless
-            cmd = [
-                chrome_exe,
-                f"--remote-debugging-port={port}",
-                f"--user-data-dir={user_data_dir}",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--window-size=1920,1080",
-                "--remote-allow-origins=*",
-            ]
-            
-            print(f"启动Chrome (端口 {port})...")
-            self.chrome_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(3)
-            
-            # 获取WebSocket URL
-            try:
-                response = requests.get(f"http://localhost:{port}/json", timeout=5)
-                tabs = response.json()
-                ws_url = None
-                for tab in tabs:
-                    if 'webSocketDebuggerUrl' in tab:
-                        ws_url = tab['webSocketDebuggerUrl']
-                        break
-                
-                if not ws_url:
-                    print("无法获取WebSocket URL")
-                    return None
-            except Exception as e:
-                print(f"连接Chrome失败: {e}")
-                return None
-            
-            # 连接WebSocket
-            self.ws = websocket.create_connection(ws_url)
-            
-            # 启用网络监控
-            self._send_command("Network.enable")
-            self._send_command("Page.enable")
-            
-            # 使用提供的URL或构造URL
-            if not live_url:
-                live_url = f"https://www.xiaohongshu.com/livestream/dynpath{room_id[-6:]}/{room_id}"
-            print(f"访问直播间: {live_url}")
-            self._send_command("Page.navigate", {"url": live_url})
-            
-            # 监听网络请求
-            print(f"等待捕获直播流 ({wait_time}秒)...")
-            self.ws.settimeout(1)
-            start_time = time.time()
-            stream_url = None
-            request_urls = {}
-            
-            while time.time() - start_time < wait_time:
-                try:
-                    result = self.ws.recv()
-                    if result:
-                        data = json.loads(result)
-                        method = data.get("method", "")
-                        
-                        if method == "Network.requestWillBeSent":
-                            request = data.get("params", {}).get("request", {})
-                            request_url = request.get("url", "")
-                            request_id = data.get("params", {}).get("requestId", "")
-                            request_urls[request_id] = request_url
-                            
-                            # 检查是否是直播流URL
-                            if 'live-source-play.xhscdn.com' in request_url and '.flv' in request_url:
-                                print(f"找到直播流: {request_url}")
-                                stream_url = request_url
-                                break
-                                
-                except websocket.WebSocketTimeoutException:
-                    continue
-                except Exception:
-                    continue
-            
+        # 方法1: 尝试调用直播API获取流地址
+        stream_url = self._get_stream_url_from_api(room_id)
+        if stream_url:
             return stream_url
+        
+        # 方法2: 基于已知格式构造流地址
+        # 格式: https://live-source-play.xhscdn.com/live/{room_id}_hcv520.flv
+        # 注意：hcv520 是观察到的固定后缀
+        return self._build_stream_url(room_id)
+    
+    def _get_stream_url_from_api(self, room_id: str) -> Optional[str]:
+        """
+        通过API获取直播流地址
+        
+        Args:
+            room_id: 直播间ID
+            
+        Returns:
+            流URL或None
+        """
+        try:
+            # 小红书直播间信息API
+            api_url = f"https://live-room.xiaohongshu.com/api/sns/red/live/web/v1/room/current_room_info"
+            params = {
+                'room_id': room_id,
+                'source': 'web_live',
+                'client_type': 1
+            }
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': f'https://www.xiaohongshu.com/livestream/',
+                'Accept': 'application/json, text/plain, */*',
+            }
+            
+            response = self.session.get(api_url, params=params, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # 解析返回数据获取流地址
+                if data.get('success'):
+                    room_info = data.get('data', {})
+                    # 尝试从不同字段获取流地址
+                    stream_info = room_info.get('stream', {}) or room_info.get('live_stream', {})
+                    
+                    # 可能的字段名
+                    for field in ['flv_pull_url', 'flv_url', 'stream_url', 'hls_pull_url']:
+                        if stream_info.get(field):
+                            return stream_info[field]
+                    
+                    # 嵌套结构
+                    flv_urls = stream_info.get('flv', {})
+                    if flv_urls:
+                        # 获取第一个可用的FLV地址
+                        for quality, url in flv_urls.items():
+                            if url:
+                                return url
+                    
+                    # 打印响应结构便于调试
+                    print(f"API响应: {json.dumps(data, ensure_ascii=False, indent=2)[:500]}")
+            
+            return None
             
         except Exception as e:
-            print(f"CDP捕获失败: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"API获取流地址失败: {e}")
             return None
-        finally:
-            self._cleanup()
     
-    def _find_chrome(self) -> Optional[str]:
-        """查找Chrome浏览器路径"""
-        chrome_paths = [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
-        ]
-        for path in chrome_paths:
-            if os.path.exists(path):
-                return path
-        return None
-    
-    def _send_command(self, method: str, params: dict = None):
-        """发送CDP命令"""
-        cmd = {"id": 1, "method": method}
-        if params:
-            cmd["params"] = params
-        self.ws.send(json.dumps(cmd))
-        return json.loads(self.ws.recv())
-    
-    def _cleanup(self):
-        """清理资源"""
-        if self.ws:
-            try:
-                self.ws.close()
-            except:
-                pass
-        if self.chrome_process:
-            try:
-                self.chrome_process.terminate()
-            except:
-                pass
-    
-    def get_stream_url_simple(self, room_id: str) -> Optional[str]:
+    def _build_stream_url(self, room_id: str) -> str:
         """
-        简单方式获取直播流URL（基于已知格式构造）
-        注意：此方法可能需要更新签名参数
+        根据已知格式构造流地址
+        
+        观察到的格式:
+        https://live-source-play.xhscdn.com/live/{room_id}_hcv520.flv?userId=xxx
         
         Args:
             room_id: 直播间ID
             
         Returns:
-            直播流URL或None
+            流URL
         """
         # 基于捕获到的URL格式构造
-        # 格式: https://live-source-play.xhscdn.com/live/{room_id}_orig.flv
-        # 注意：实际URL可能需要额外的签名参数
-        base_url = f"https://live-source-play.xhscdn.com/live/{room_id}_orig.flv"
+        base_url = f"https://live-source-play.xhscdn.com/live/{room_id}_hcv520.flv"
         return base_url
 
 

@@ -207,9 +207,9 @@ class XHSLiveCapturer:
         self.logger.info(f"  房间ID: {room_id}")
         self.logger.info(f"  长链接: {long_url[:80]}..." if long_url else "  长链接: N/A")
         
-        # 使用CDP获取直播流地址（传递完整的长链接）
+        # 获取直播流地址
         self.logger.info("正在获取直播流地址...")
-        stream_url = self._link_converter.get_stream_url_via_cdp(room_id, live_url=long_url, wait_time=20)
+        stream_url = self._link_converter.get_stream_url(room_id)
         
         if stream_url:
             self._stream_info = {

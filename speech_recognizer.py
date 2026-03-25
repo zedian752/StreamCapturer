@@ -291,8 +291,8 @@ class ContinuousSpeechRecognizer:
         self._stop_event = threading.Event()
         self._recognize_thread: Optional[threading.Thread] = None
         
-        # 音频队列
-        self._audio_queue: queue.Queue = queue.Queue(maxsize=100)
+        # 音频队列（不限制大小）
+        self._audio_queue: queue.Queue = queue.Queue()
         
         # 回调函数
         self._on_result: Optional[Callable[[RecognitionResult], None]] = None
