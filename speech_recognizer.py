@@ -263,6 +263,9 @@ class SenseVoiceRecognizer(BaseRecognizer):
         self._model = None
         self._postprocess_func = None
         self._status = RecognizerStatus.IDLE
+
+        if (self.vad_model is None or not self.vad_model):
+            raise RuntimeError('[vad_model] is invalid string')      
     
     @property
     def status(self) -> RecognizerStatus:
@@ -321,14 +324,14 @@ class SenseVoiceRecognizer(BaseRecognizer):
         start_time = time.time()
         
         try:
-            # 将字节数据转换为numpy数组
-            audio_array = np.frombuffer(audio_data, dtype=np.int16)
-            # 归一化为float32
-            audio_float = audio_array.astype(np.float32) / 32768.0
+            # # 将字节数据转换为numpy数组
+            # audio_array = np.frombuffer(audio_data, dtype=np.int16)
+            # # 归一化为float32
+            # audio_float = audio_array.astype(np.float32) / 32768.0
             
             # 使用SenseVoice进行识别
             result = self._model.generate(
-                input=audio_float,
+                input=audio_data,
                 cache={},
                 language=self.language,  # "auto", "zh", "en", "yue", "ja", "ko", "nospeech"
                 use_itn=True,
@@ -566,6 +569,7 @@ class SpeechRecognizerManager:
                 model=sensevoice_config.get('model', 'iic/SenseVoiceSmall'),
                 language=sensevoice_config.get('language', 'auto'),
                 device=sensevoice_config.get('device', 'cpu'),
+                vad_model=sensevoice_config.get('vad_model'),
             )
         else:
             raise ValueError(f"不支持的识别引擎: {self.engine_type}")
