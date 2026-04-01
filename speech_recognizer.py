@@ -485,7 +485,7 @@ class ContinuousSpeechRecognizer:
             self._audio_queue.put_nowait((audio_data, sample_rate, duration))
         except queue.Full:
             logger.warning("音频队列已满，丢弃数据")
-    
+    # 识别线程
     def _recognize_worker(self):
         while not self._stop_event.is_set():
             try:
@@ -498,7 +498,7 @@ class ContinuousSpeechRecognizer:
                 
                 self._audio_buffer.append(audio_data)
                 self._buffer_duration += duration
-                
+                # 满足时长才开始处理
                 if self._buffer_duration >= self.max_chunk_duration:
                     self._process_buffer()
                     
@@ -510,7 +510,7 @@ class ContinuousSpeechRecognizer:
     def _process_buffer(self):
         if not self._audio_buffer or self._buffer_duration < self.min_chunk_duration:
             return
-        
+        # 合并二进制块
         combined_audio = b''.join(self._audio_buffer)
         
         self._audio_buffer = []
@@ -528,7 +528,7 @@ class ContinuousSpeechRecognizer:
             
             if self._on_result and result.text:
                 logger.info(f"识别结果: {result.text}")
-                self._on_result(result)
+                self._on_result(result) # 处理识别结果
             elif result.text:
                 logger.info(f"识别结果: {result.text}")
                 
