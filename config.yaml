@@ -56,7 +56,9 @@ speech_recognition:
     # 模型名称
     #model: "iic/SenseVoiceSmall"
     model: "./models/SenseVoiceSmall"
+    vad_model: "./models/speech_fsmn_vad_zh-cn-16k-common-pytorch"
     # 语言: auto, zh, en, ja, ko, cantonese
+    # 建议: "auto" 自动检测语言效果最好
     language: "auto"
     # 设备: cuda, cpu
     device: "cpu"
