@@ -144,7 +144,7 @@ class XHSLiveCapturer:
         )
         
         # 设置流捕获器回调
-        self._stream_capturer.on_audio_chunk(self._on_audio_chunk)
+        self._stream_capturer.on_audio_chunk(self._on_audio_chunk) #当接受到数据
         self._stream_capturer.on_status_change(self._on_stream_status)
         self._stream_capturer.on_error(self._on_stream_error)
         
@@ -364,28 +364,49 @@ class XHSLiveCapturer:
             self.logger.error(f"保存文本失败: {e}")
     
     def _save_audio_buffer(self):
-        """保存音频缓冲区到文件"""
+        """保存音频缓冲区到文件（同时保存.raw和.wav格式）"""
         if not self._audio_buffer or not self._output_dir:
             return
-        
+
         output_config = self.config.get('output', {})
         if not output_config.get('save_audio', True):
             self._audio_buffer.clear()
             return
-        
+
         try:
             timestamp = datetime.now().strftime('%H%M%S')
-            audio_file = self._output_dir / f"audio_{timestamp}.raw"
             
-            with open(audio_file, 'wb') as f:
-                for chunk in self._audio_buffer:
-                    f.write(chunk)
+            # 合并所有音频数据
+            combined_audio = b''.join(self._audio_buffer)
             
-            self.logger.debug(f"保存音频: {audio_file}")
+            # 1. 保存原始PCM文件
+            raw_file = self._output_dir / f"audio_{timestamp}.raw"
+            with open(raw_file, 'wb') as f:
+                f.write(combined_audio)
+            
+            # 2. 保存WAV文件（添加头部）
+            wav_file = self._output_dir / f"audio_{timestamp}.wav"
+            self._save_as_wav(combined_audio, wav_file)
+            
+            self.logger.info(f"保存音频: {raw_file.name}, {wav_file.name}")
             self._audio_buffer.clear()
-            
+
         except Exception as e:
             self.logger.error(f"保存音频失败: {e}")
+    
+    def _save_as_wav(self, audio_data: bytes, output_path: Path):
+        """将PCM数据保存为WAV格式"""
+        import wave
+        
+        stream_config = self.config.get('stream', {})
+        sample_rate = stream_config.get('sample_rate', 16000)
+        channels = stream_config.get('channels', 1)
+        
+        with wave.open(str(output_path), 'wb') as wav_file:
+            wav_file.setnchannels(channels)
+            wav_file.setsampwidth(2)  # 16位 = 2字节
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(audio_data)
     
     @property
     def is_running(self) -> bool:

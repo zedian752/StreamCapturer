@@ -549,7 +549,7 @@ class SpeechRecognizerManager:
     
     def __init__(self, config: Dict):
         self.config = config
-        self.engine_type = config.get('engine', 'whisper')
+        self.engine_type = config.get('engine', 'sensevoice')
         
         self._recognizer = self._create_recognizer()
         self._continuous_recognizer = None
