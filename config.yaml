@@ -36,16 +36,28 @@ stream:
 
 # 语音识别配置
 speech_recognition:
-  # 识别引擎: whisper, azure, aliyun, volcengine
-  engine: "whisper"
+  # 识别引擎: whisper, sensevoice
+  # whisper: OpenAI开源模型，多语言支持
+  # sensevoice: 阿里达摩院开源模型，中文效果更好
+  engine: "sensevoice"
   
   # Whisper配置（本地运行）
   whisper:
     # 模型大小: tiny, base, small, medium, large
-    # tiny最快但准确率较低，large最准但需要更多资源
     model: "base"
     # 语言
     language: "zh"
+    # 设备: cuda, cpu
+    device: "cpu"
+  
+  # SenseVoice配置（本地运行）
+  # 对中文识别效果更好，支持情感识别
+  sensevoice:
+    # 模型名称
+    #model: "iic/SenseVoiceSmall"
+    model: "./models/SenseVoiceSmall"
+    # 语言: auto, zh, en, ja, ko, cantonese
+    language: "auto"
     # 设备: cuda, cpu
     device: "cpu"
   

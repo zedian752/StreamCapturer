@@ -1,7 +1,7 @@
 """
 语音识别器
 将音频数据转换为文字
-支持多种语音识别引擎：Whisper（本地）、Azure、阿里云、火山引擎
+支持多种语音识别引擎：Whisper（本地）、SenseVoice（本地）
 """
 
 import os
@@ -11,6 +11,7 @@ import threading
 import queue
 import time
 import json
+import re
 from typing import Optional, Callable, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
@@ -37,7 +38,7 @@ class RecognitionResult:
     start_time: float
     end_time: float
     confidence: float = 1.0
-    segments: Optional[List[Dict]] = None  # 分段信息（如果有）
+    segments: Optional[List[Dict]] = None
     language: str = "zh"
     
 
@@ -51,16 +52,7 @@ class BaseRecognizer(ABC):
     
     @abstractmethod
     def recognize(self, audio_data: bytes, sample_rate: int = 16000) -> RecognitionResult:
-        """
-        识别音频数据
-        
-        Args:
-            audio_data: PCM音频数据（16位小端）
-            sample_rate: 采样率
-            
-        Returns:
-            识别结果
-        """
+        """识别音频数据"""
         pass
     
     @abstractmethod
@@ -72,7 +64,6 @@ class BaseRecognizer(ABC):
 class WhisperRecognizer(BaseRecognizer):
     """
     OpenAI Whisper 本地语音识别器
-    支持多种模型大小，对中文有良好支持
     """
     
     def __init__(
@@ -82,21 +73,13 @@ class WhisperRecognizer(BaseRecognizer):
         device: str = "cpu",
         compute_type: str = "float32"
     ):
-        """
-        初始化Whisper识别器
-        
-        Args:
-            model_size: 模型大小 (tiny, base, small, medium, large)
-            language: 语言代码
-            device: 计算设备 (cpu, cuda)
-            compute_type: 计算精度 (float32, float16, int8)
-        """
         self.model_size = model_size
         self.language = language
         self.device = device
         self.compute_type = compute_type
         
         self._model = None
+        self._use_faster_whisper = False
         self._status = RecognizerStatus.IDLE
     
     @property
@@ -109,7 +92,6 @@ class WhisperRecognizer(BaseRecognizer):
             self._status = RecognizerStatus.LOADING
             logger.info(f"正在加载Whisper模型: {self.model_size}")
             
-            # 尝试使用faster-whisper（更快）
             try:
                 from faster_whisper import WhisperModel
                 
@@ -122,7 +104,6 @@ class WhisperRecognizer(BaseRecognizer):
                 logger.info("使用 faster-whisper 引擎")
                 
             except ImportError:
-                # 回退到openai-whisper
                 import whisper
                 
                 self._model = whisper.load_model(
@@ -150,14 +131,13 @@ class WhisperRecognizer(BaseRecognizer):
         start_time = time.time()
         
         try:
-            # 将PCM字节转换为numpy数组
             audio_array = np.frombuffer(audio_data, dtype=np.int16)
             audio_float = audio_array.astype(np.float32) / 32768.0
             
             if self._use_faster_whisper:
-                result = self._recognize_faster_whisper(audio_float, sample_rate)
+                result = self._recognize_faster_whisper(audio_float)
             else:
-                result = self._recognize_openai_whisper(audio_float, sample_rate)
+                result = self._recognize_openai_whisper(audio_float)
             
             return result
             
@@ -172,17 +152,16 @@ class WhisperRecognizer(BaseRecognizer):
         finally:
             self._status = RecognizerStatus.READY
     
-    def _recognize_faster_whisper(self, audio: np.ndarray, sample_rate: int) -> RecognitionResult:
+    def _recognize_faster_whisper(self, audio: np.ndarray) -> RecognitionResult:
         """使用faster-whisper进行识别"""
         segments, info = self._model.transcribe(
             audio,
             language=self.language,
             beam_size=5,
-            vad_filter=True,  # 语音活动检测
+            vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500)
         )
         
-        # 收集所有文本
         text_parts = []
         segment_list = []
         
@@ -201,12 +180,12 @@ class WhisperRecognizer(BaseRecognizer):
             text=full_text,
             start_time=time.time(),
             end_time=time.time(),
-            confidence=info.language_probability if hasattr(info, 'language_probability') else 1.0,
+            confidence=getattr(info, 'language_probability', 1.0),
             segments=segment_list,
             language=self.language
         )
     
-    def _recognize_openai_whisper(self, audio: np.ndarray, sample_rate: int) -> RecognitionResult:
+    def _recognize_openai_whisper(self, audio: np.ndarray) -> RecognitionResult:
         """使用openai-whisper进行识别"""
         result = self._model.transcribe(
             audio,
@@ -214,7 +193,6 @@ class WhisperRecognizer(BaseRecognizer):
             fp16=False if self.device == "cpu" else True
         )
         
-        # 收集所有文本
         text_parts = []
         segment_list = []
         
@@ -244,7 +222,6 @@ class WhisperRecognizer(BaseRecognizer):
             del self._model
             self._model = None
         
-        # 尝试清理GPU内存
         if self.device == "cuda":
             try:
                 import torch
@@ -256,10 +233,183 @@ class WhisperRecognizer(BaseRecognizer):
         logger.info("Whisper识别器已关闭")
 
 
+class SenseVoiceRecognizer(BaseRecognizer):
+    """
+    SenseVoice 语音识别器
+    阿里达摩院开源的语音识别模型，对中文有优秀支持
+    使用VAD进行语音活动检测，自动分段处理
+    """
+    
+    def __init__(
+        self,
+        model: str = "iic/SenseVoiceSmall",
+        language: str = "auto",
+        device: str = "cpu",
+        vad_model: str = "fsmn-vad",
+        max_single_segment_time: int = 30000,
+        merge_vad: bool = True,
+        merge_length_s: int = 15,
+        batch_size_s: int = 60
+    ):
+        self.model_name = model
+        self.language = language
+        self.device = device
+        self.vad_model = vad_model
+        self.max_single_segment_time = max_single_segment_time
+        self.merge_vad = merge_vad
+        self.merge_length_s = merge_length_s
+        self.batch_size_s = batch_size_s
+        
+        self._model = None
+        self._postprocess_func = None
+        self._status = RecognizerStatus.IDLE
+    
+    @property
+    def status(self) -> RecognizerStatus:
+        return self._status
+    
+    def initialize(self) -> bool:
+        """加载SenseVoice模型"""
+        try:
+            self._status = RecognizerStatus.LOADING
+            logger.info(f"正在加载SenseVoice模型: {self.model_name}")
+            
+            from funasr import AutoModel
+            from funasr.utils.postprocess_utils import rich_transcription_postprocess
+            
+            # 保存后处理函数引用
+            self._postprocess_func = rich_transcription_postprocess
+            
+            # 设备格式转换：cpu -> cpu, cuda -> cuda:0
+            device = self.device
+            if device == "cuda":
+                device = "cuda:0"
+            
+            self._model = AutoModel(
+                model=self.model_name,
+                trust_remote_code=True,
+                remote_code="./model.py",
+                vad_model=self.vad_model,
+                vad_kwargs={"max_single_segment_time": self.max_single_segment_time},
+                device=device,
+                disable_pbar=True,
+            )
+            logger.info("使用 funasr 引擎 (SenseVoice + VAD)")
+            
+            self._status = RecognizerStatus.READY
+            logger.info(f"SenseVoice模型加载完成")
+            return True
+            
+        except ImportError as e:
+            self._status = RecognizerStatus.ERROR
+            logger.error(f"请安装 funasr: pip install funasr modelscope")
+            logger.error(f"导入错误: {e}")
+            return False
+        except Exception as e:
+            self._status = RecognizerStatus.ERROR
+            logger.error(f"加载SenseVoice模型失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def recognize(self, audio_data: bytes, sample_rate: int = 16000) -> RecognitionResult:
+        """识别音频"""
+        if self._status != RecognizerStatus.READY:
+            raise RuntimeError("识别器未初始化")
+        
+        self._status = RecognizerStatus.RECOGNIZING
+        start_time = time.time()
+        
+        try:
+            # 将字节数据转换为numpy数组
+            audio_array = np.frombuffer(audio_data, dtype=np.int16)
+            # 归一化为float32
+            audio_float = audio_array.astype(np.float32) / 32768.0
+            
+            # 使用SenseVoice进行识别
+            result = self._model.generate(
+                input=audio_float,
+                cache={},
+                language=self.language,  # "auto", "zh", "en", "yue", "ja", "ko", "nospeech"
+                use_itn=True,
+                batch_size_s=self.batch_size_s,
+                merge_vad=self.merge_vad,
+                merge_length_s=self.merge_length_s,
+            )
+            
+            # 提取并后处理识别结果
+            text = ""
+            if result and len(result) > 0:
+                first_result = result[0]
+                if isinstance(first_result, dict):
+                    raw_text = first_result.get("text", "")
+                    if raw_text and self._postprocess_func:
+                        text = self._postprocess_func(raw_text)
+                    else:
+                        text = raw_text
+                elif isinstance(first_result, str):
+                    if self._postprocess_func:
+                        text = self._postprocess_func(first_result)
+                    else:
+                        text = first_result
+            
+            # 清理文本
+            if text:
+                text = text.strip()
+            
+            return RecognitionResult(
+                text=text,
+                start_time=start_time,
+                end_time=time.time(),
+                confidence=1.0,
+                language=self._detect_language(text)
+            )
+            
+        except Exception as e:
+            logger.error(f"识别失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return RecognitionResult(
+                text="",
+                start_time=start_time,
+                end_time=time.time(),
+                confidence=0.0
+            )
+        finally:
+            self._status = RecognizerStatus.READY
+    
+    def _detect_language(self, text: str) -> str:
+        """简单检测文本语言"""
+        if not text:
+            return "unknown"
+        # 简单判断：如果有中文字符返回zh
+        for char in text:
+            if '\u4e00' <= char <= '\u9fff':
+                return "zh"
+        return "auto"
+    
+    def close(self):
+        """释放资源"""
+        if self._model:
+            del self._model
+            self._model = None
+        
+        self._postprocess_func = None
+        
+        if self.device == "cuda":
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except:
+                pass
+        
+        self._status = RecognizerStatus.IDLE
+        logger.info("SenseVoice识别器已关闭")
+
+
 class ContinuousSpeechRecognizer:
     """
     连续语音识别器
-    持续从音频队列获取数据并进行识别
     """
     
     def __init__(
@@ -269,36 +419,22 @@ class ContinuousSpeechRecognizer:
         max_chunk_duration: float = 30.0,
         silence_threshold: float = 0.01
     ):
-        """
-        初始化连续识别器
-        
-        Args:
-            recognizer: 底层识别器
-            min_chunk_duration: 最小处理块时长（秒）
-            max_chunk_duration: 最大处理块时长（秒）
-            silence_threshold: 静音阈值
-        """
         self.recognizer = recognizer
         self.min_chunk_duration = min_chunk_duration
         self.max_chunk_duration = max_chunk_duration
         self.silence_threshold = silence_threshold
         
-        # 音频缓冲
         self._audio_buffer: List[bytes] = []
         self._buffer_duration: float = 0.0
         
-        # 控制标志
         self._stop_event = threading.Event()
         self._recognize_thread: Optional[threading.Thread] = None
         
-        # 音频队列（不限制大小）
         self._audio_queue: queue.Queue = queue.Queue()
         
-        # 回调函数
         self._on_result: Optional[Callable[[RecognitionResult], None]] = None
         self._on_error: Optional[Callable[[str], None]] = None
         
-        # 统计
         self._stats = {
             'total_chunks': 0,
             'total_duration': 0.0,
@@ -310,19 +446,15 @@ class ContinuousSpeechRecognizer:
         return self._stats.copy()
     
     def on_result(self, callback: Callable[[RecognitionResult], None]):
-        """设置识别结果回调"""
         self._on_result = callback
     
     def on_error(self, callback: Callable[[str], None]):
-        """设置错误回调"""
         self._on_error = callback
     
     def initialize(self) -> bool:
-        """初始化识别器"""
         return self.recognizer.initialize()
     
     def start(self):
-        """开始连续识别"""
         self._stop_event.clear()
         self._recognize_thread = threading.Thread(
             target=self._recognize_worker,
@@ -332,29 +464,18 @@ class ContinuousSpeechRecognizer:
         logger.info("连续语音识别已启动")
     
     def stop(self):
-        """停止识别"""
         self._stop_event.set()
         
         if self._recognize_thread and self._recognize_thread.is_alive():
             self._recognize_thread.join(timeout=5)
         
-        # 处理剩余缓冲
         if self._audio_buffer:
             self._process_buffer()
         
         logger.info("连续语音识别已停止")
     
     def add_audio(self, audio_data: bytes, sample_rate: int = 16000, duration: float = 0):
-        """
-        添加音频数据到队列
-        
-        Args:
-            audio_data: PCM音频数据
-            sample_rate: 采样率
-            duration: 音频时长（秒），如果不提供则自动计算
-        """
         if duration == 0:
-            # 16位PCM，每秒 = sample_rate * 2 字节
             duration = len(audio_data) / (sample_rate * 2)
         
         try:
@@ -363,23 +484,18 @@ class ContinuousSpeechRecognizer:
             logger.warning("音频队列已满，丢弃数据")
     
     def _recognize_worker(self):
-        """识别工作线程"""
         while not self._stop_event.is_set():
             try:
-                # 从队列获取音频数据
                 try:
                     audio_data, sample_rate, duration = self._audio_queue.get(timeout=0.5)
                 except queue.Empty:
-                    # 超时，检查是否需要处理缓冲区
                     if self._buffer_duration >= self.min_chunk_duration:
                         self._process_buffer()
                     continue
                 
-                # 添加到缓冲区
                 self._audio_buffer.append(audio_data)
                 self._buffer_duration += duration
                 
-                # 检查是否需要处理
                 if self._buffer_duration >= self.max_chunk_duration:
                     self._process_buffer()
                     
@@ -389,14 +505,11 @@ class ContinuousSpeechRecognizer:
                     self._on_error(str(e))
     
     def _process_buffer(self):
-        """处理缓冲区中的音频"""
         if not self._audio_buffer or self._buffer_duration < self.min_chunk_duration:
             return
         
-        # 合并音频数据
         combined_audio = b''.join(self._audio_buffer)
         
-        # 清空缓冲区
         self._audio_buffer = []
         buffer_duration = self._buffer_duration
         self._buffer_duration = 0.0
@@ -404,15 +517,12 @@ class ContinuousSpeechRecognizer:
         logger.debug(f"开始识别 {buffer_duration:.1f} 秒的音频")
         
         try:
-            # 调用识别器
             result = self.recognizer.recognize(combined_audio)
             
-            # 更新统计
             self._stats['total_chunks'] += 1
             self._stats['total_duration'] += buffer_duration
             self._stats['total_text_length'] += len(result.text)
             
-            # 触发回调
             if self._on_result and result.text:
                 logger.info(f"识别结果: {result.text}")
                 self._on_result(result)
@@ -425,7 +535,6 @@ class ContinuousSpeechRecognizer:
                 self._on_error(str(e))
     
     def close(self):
-        """关闭识别器"""
         self.stop()
         self.recognizer.close()
 
@@ -433,23 +542,13 @@ class ContinuousSpeechRecognizer:
 class SpeechRecognizerManager:
     """
     语音识别管理器
-    提供统一的接口管理语音识别
     """
     
     def __init__(self, config: Dict):
-        """
-        初始化管理器
-        
-        Args:
-            config: 配置字典
-        """
         self.config = config
         self.engine_type = config.get('engine', 'whisper')
         
-        # 创建底层识别器
         self._recognizer = self._create_recognizer()
-        
-        # 创建连续识别器
         self._continuous_recognizer = None
     
     def _create_recognizer(self) -> BaseRecognizer:
@@ -461,19 +560,23 @@ class SpeechRecognizerManager:
                 language=whisper_config.get('language', 'zh'),
                 device=whisper_config.get('device', 'cpu'),
             )
+        elif self.engine_type == 'sensevoice':
+            sensevoice_config = self.config.get('sensevoice', {})
+            return SenseVoiceRecognizer(
+                model=sensevoice_config.get('model', 'iic/SenseVoiceSmall'),
+                language=sensevoice_config.get('language', 'auto'),
+                device=sensevoice_config.get('device', 'cpu'),
+            )
         else:
             raise ValueError(f"不支持的识别引擎: {self.engine_type}")
     
     def initialize(self) -> bool:
-        """初始化"""
         return self._recognizer.initialize()
     
     def recognize(self, audio_data: bytes, sample_rate: int = 16000) -> RecognitionResult:
-        """单次识别"""
         return self._recognizer.recognize(audio_data, sample_rate)
     
     def create_continuous_recognizer(self) -> ContinuousSpeechRecognizer:
-        """创建连续识别器"""
         self._continuous_recognizer = ContinuousSpeechRecognizer(
             recognizer=self._recognizer,
             min_chunk_duration=self.config.get('min_chunk_duration', 3.0),
@@ -482,7 +585,6 @@ class SpeechRecognizerManager:
         return self._continuous_recognizer
     
     def close(self):
-        """关闭"""
         if self._continuous_recognizer:
             self._continuous_recognizer.close()
             self._continuous_recognizer = None
@@ -490,14 +592,12 @@ class SpeechRecognizerManager:
 
 
 if __name__ == "__main__":
-    # 测试代码
     import sys
     logging.basicConfig(
         level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # 创建识别器
     config = {
         'engine': 'whisper',
         'whisper': {
@@ -509,9 +609,8 @@ if __name__ == "__main__":
     
     manager = SpeechRecognizerManager(config)
     
-    print("正在初始化Whisper模型...")
+    print("正在初始化模型...")
     if manager.initialize():
         print("模型加载成功！")
-        print("SpeechRecognizer 模块测试完成")
     else:
         print("模型加载失败")

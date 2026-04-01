@@ -150,6 +150,9 @@ class XHSLiveCapturer:
         
         # 语音识别器
         speech_config = self.config.get('speech_recognition', {})
+        engine = speech_config.get('engine', 'whisper')
+        self.logger.info(f"使用语音识别引擎: {engine}")
+        
         self._speech_manager = SpeechRecognizerManager(speech_config)
         
         # 初始化语音识别
@@ -412,7 +415,21 @@ def load_config(config_path: Optional[str] = None) -> Dict:
     """加载配置文件"""
     config = DEFAULT_CONFIG.copy()
     
+    # 如果未指定配置文件，尝试自动查找默认配置文件
+    if config_path is None:
+        # 按顺序尝试这些默认路径
+        default_paths = [
+            'config.yaml',
+            './config.yaml',
+            os.path.join(os.path.dirname(__file__), 'config.yaml'),
+        ]
+        for path in default_paths:
+            if os.path.exists(path):
+                config_path = path
+                break
+    
     if config_path and os.path.exists(config_path):
+        print(f"加载配置文件: {config_path}")
         with open(config_path, 'r', encoding='utf-8') as f:
             user_config = yaml.safe_load(f)
             if user_config:
