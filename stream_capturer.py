@@ -92,8 +92,9 @@ class StreamCapturer:
         # FFmpeg进程
         self._ffmpeg_process: Optional[subprocess.Popen] = None
         
-        # 音频队列（不限制大小）
-        self._audio_queue: queue.Queue = queue.Queue()
+        # 音频队列（限制大小，防止内存泄漏）
+        # 最多保存10个音频块（每个约5秒，共约50秒数据）
+        self._audio_queue: queue.Queue = queue.Queue(maxsize=10)
         
         # 控制标志
         self._stop_event = threading.Event()
