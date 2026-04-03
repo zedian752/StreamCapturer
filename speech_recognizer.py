@@ -40,6 +40,7 @@ class RecognitionResult:
     confidence: float = 1.0
     segments: Optional[List[Dict]] = None
     language: str = "zh"
+    audio_data: Optional[bytes] = None  # 新增：保存对应的音频数据
     
 
 class BaseRecognizer(ABC):
@@ -510,7 +511,7 @@ class ContinuousSpeechRecognizer:
     def _process_buffer(self):
         if not self._audio_buffer or self._buffer_duration < self.min_chunk_duration:
             return
-        # 合并二进制块
+        
         combined_audio = b''.join(self._audio_buffer)
         
         self._audio_buffer = []
@@ -522,13 +523,16 @@ class ContinuousSpeechRecognizer:
         try:
             result = self.recognizer.recognize(combined_audio)
             
+            # 将音频数据附加到识别结果中
+            result.audio_data = combined_audio
+            
             self._stats['total_chunks'] += 1
             self._stats['total_duration'] += buffer_duration
             self._stats['total_text_length'] += len(result.text)
             
             if self._on_result and result.text:
                 logger.info(f"识别结果: {result.text}")
-                self._on_result(result) # 处理识别结果
+                self._on_result(result)
             elif result.text:
                 logger.info(f"识别结果: {result.text}")
                 

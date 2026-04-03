@@ -294,15 +294,10 @@ class XHSLiveCapturer:
         if not self._is_running:
             return
         
-        # 保存音频到缓冲区
+        # 保存音频到缓冲区（识别成功后才会清空）
         output_config = self.config.get('output', {})
         if output_config.get('save_audio', True):
             self._audio_buffer.append(chunk.data)
-            
-            # 每60秒保存一次
-            total_duration = sum(len(d) for d in self._audio_buffer) / (chunk.sample_rate * 2)
-            if total_duration >= 60:
-                self._save_audio_buffer()
         
         # 发送到语音识别
         if self._continuous_recognizer:
@@ -347,9 +342,34 @@ class XHSLiveCapturer:
         if output_config.get('save_text', True) and self._text_file:
             self._save_text(result.text, timestamp)
         
+        # 识别成功后保存音频（如果有音频数据）
+        if result.audio_data and output_config.get('save_audio', True) and self._output_dir:
+            self._save_audio_from_result(result.audio_data, timestamp)
+        
         # 触发回调
         if self._on_text_callback:
             self._on_text_callback(result.text, timestamp)
+    
+    def _save_audio_from_result(self, audio_data: bytes, timestamp: str):
+        """从识别结果保存音频文件"""
+        from utils import save_as_wav
+        
+        # 保存原始PCM文件
+        raw_file = self._output_dir / f"audio_{timestamp.replace(':', '')}.raw"
+        with open(raw_file, 'wb') as f:
+            f.write(audio_data)
+        
+        # 保存WAV文件
+        wav_file = self._output_dir / f"audio_{timestamp.replace(':', '')}.wav"
+        stream_config = self.config.get('stream', {})
+        save_as_wav(
+            audio_data,
+            wav_file,
+            sample_rate=stream_config.get('sample_rate', 16000),
+            channels=stream_config.get('channels', 1)
+        )
+        
+        self.logger.info(f"保存音频: {raw_file.name}, {wav_file.name}")
     
     def _on_recognition_error(self, error: str):
         """处理识别错误"""
@@ -365,48 +385,22 @@ class XHSLiveCapturer:
     
     def _save_audio_buffer(self):
         """保存音频缓冲区到文件（同时保存.raw和.wav格式）"""
-        if not self._audio_buffer or not self._output_dir:
-            return
-
-        output_config = self.config.get('output', {})
-        if not output_config.get('save_audio', True):
-            self._audio_buffer.clear()
-            return
-
-        try:
-            timestamp = datetime.now().strftime('%H%M%S')
-            
-            # 合并所有音频数据
-            combined_audio = b''.join(self._audio_buffer)
-            
-            # 1. 保存原始PCM文件
-            raw_file = self._output_dir / f"audio_{timestamp}.raw"
-            with open(raw_file, 'wb') as f:
-                f.write(combined_audio)
-            
-            # 2. 保存WAV文件（添加头部）
-            wav_file = self._output_dir / f"audio_{timestamp}.wav"
-            self._save_as_wav(combined_audio, wav_file)
-            
-            self.logger.info(f"保存音频: {raw_file.name}, {wav_file.name}")
-            self._audio_buffer.clear()
-
-        except Exception as e:
-            self.logger.error(f"保存音频失败: {e}")
-    
-    def _save_as_wav(self, audio_data: bytes, output_path: Path):
-        """将PCM数据保存为WAV格式"""
-        import wave
+        from utils import save_audio_buffer as utils_save_audio_buffer
         
         stream_config = self.config.get('stream', {})
         sample_rate = stream_config.get('sample_rate', 16000)
         channels = stream_config.get('channels', 1)
         
-        with wave.open(str(output_path), 'wb') as wav_file:
-            wav_file.setnchannels(channels)
-            wav_file.setsampwidth(2)  # 16位 = 2字节
-            wav_file.setframerate(sample_rate)
-            wav_file.writeframes(audio_data)
+        timestamp = utils_save_audio_buffer(
+            audio_buffer=self._audio_buffer,
+            output_dir=self._output_dir,
+            sample_rate=sample_rate,
+            channels=channels
+        )
+        
+        if timestamp:
+            self.logger.info(f"保存音频: audio_{timestamp}.raw, audio_{timestamp}.wav")
+            self._audio_buffer.clear()
     
     @property
     def is_running(self) -> bool:
