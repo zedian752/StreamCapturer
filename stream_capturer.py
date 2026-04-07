@@ -365,32 +365,46 @@ class StreamCapturer:
             logger.info(f"开始读取音频数据，每次读取 {bytes_per_chunk} 字节 ({self.buffer_size}秒)")
             
             while not self._stop_event.is_set():
-                # 读取音频数据
-                audio_data = self._ffmpeg_process.stdout.read(bytes_per_chunk)
+                # 读取音频数据 - 使用循环确保读取到足够的字节
+                audio_data = b''
+                remaining = bytes_per_chunk
+                
+                while remaining > 0 and not self._stop_event.is_set():
+                    chunk_data = self._ffmpeg_process.stdout.read(remaining)
+                    if not chunk_data:
+                        # 检查进程是否结束
+                        if self._ffmpeg_process.poll() is not None:
+                            logger.warning("FFmpeg进程已结束")
+                            if audio_data:
+                                # 处理剩余的数据
+                                break
+                            return False
+                        time.sleep(0.01)
+                        continue
+                    audio_data += chunk_data
+                    remaining -= len(chunk_data)
                 
                 if not audio_data:
-                    # 检查进程是否结束
-                    if self._ffmpeg_process.poll() is not None:
-                        logger.warning("FFmpeg进程已结束")
-                        return False
-                    time.sleep(0.1)
                     continue
+                
+                # 计算实际的音频时长（秒）
+                actual_duration = len(audio_data) / (self.sample_rate * self.channels * 2)
                 
                 self._set_status(StreamStatus.STREAMING)
                 
-                # 创建音频块
+                # 创建音频块 - 使用实际计算的时长
                 chunk = AudioChunk(
                     data=audio_data,
                     timestamp=time.time(),
-                    duration=self.buffer_size,
+                    duration=actual_duration,  # 使用实际时长，而不是固定的 buffer_size
                     sample_rate=self.sample_rate,
                     channels=self.channels
                 )
                 
-                # 更新统计
+                # 更新统计 - 使用实际时长
                 self._stats['chunks_received'] += 1
                 self._stats['bytes_received'] += len(audio_data)
-                self._stats['total_duration'] += self.buffer_size
+                self._stats['total_duration'] += actual_duration  # 使用实际时长
                 self._stats['last_chunk_time'] = time.time()
                 
                 logger.info(f"last_chunk_time:[{self._stats['last_chunk_time']}], bytes_received:[{self._stats['bytes_received']}], chunks_received:[{self._stats['chunks_received']}] audio_data_len{len(audio_data)}")
