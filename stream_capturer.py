@@ -393,17 +393,19 @@ class StreamCapturer:
                 self._stats['total_duration'] += self.buffer_size
                 self._stats['last_chunk_time'] = time.time()
                 
-                # 放入队列
-                try:
-                    self._audio_queue.put_nowait(chunk)
-                except queue.Full:
-                    # 队列满，丢弃最旧的数据
-                    try:
-                        self._audio_queue.get_nowait()
-                        self._audio_queue.put_nowait(chunk)
-                        logger.debug("队列已满，丢弃旧数据")
-                    except queue.Empty:
-                        pass
+                logger.info(f"last_chunk_time:[{self._stats['last_chunk_time']}], bytes_received:[{self._stats['bytes_received']}], chunks_received:[{self._stats['chunks_received']}] audio_data_len{len(audio_data)}")
+
+                # # 放入队列
+                # try:
+                #     self._audio_queue.put_nowait(chunk)
+                # except queue.Full:
+                #     # 队列满，丢弃最旧的数据
+                #     try:
+                #         self._audio_queue.get_nowait()
+                #         self._audio_queue.put_nowait(chunk)
+                #         logger.debug("队列已满，丢弃旧数据")
+                #     except queue.Empty:
+                #         pass
                 
                 # 触发回调
                 if self._on_audio_chunk:

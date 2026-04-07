@@ -493,13 +493,16 @@ class ContinuousSpeechRecognizer:
                 try:
                     audio_data, sample_rate, duration = self._audio_queue.get(timeout=0.5)
                 except queue.Empty:
+                    # 队列为空时，如果有足够的数据就处理
                     if self._buffer_duration >= self.min_chunk_duration:
                         self._process_buffer()
                     continue
                 
+                # 累积音频数据
                 self._audio_buffer.append(audio_data)
                 self._buffer_duration += duration
-                # 满足时长才开始处理
+                
+                # 只有累积到最大时长才处理
                 if self._buffer_duration >= self.max_chunk_duration:
                     self._process_buffer()
                     
@@ -518,7 +521,9 @@ class ContinuousSpeechRecognizer:
         buffer_duration = self._buffer_duration
         self._buffer_duration = 0.0
         
-        logger.debug(f"开始识别 {buffer_duration:.1f} 秒的音频")
+        # 添加调试信息：显示音频数据大小和统计信息
+        audio_size_kb = len(combined_audio) / 1024
+        logger.info(f"开始识别 {buffer_duration:.1f} 秒的音频 ({audio_size_kb:.1f} KB)")
         
         try:
             result = self.recognizer.recognize(combined_audio)
