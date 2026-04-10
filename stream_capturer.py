@@ -407,7 +407,6 @@ class StreamCapturer:
                 self._stats['total_duration'] += actual_duration  # 使用实际时长
                 self._stats['last_chunk_time'] = time.time()
                 
-                logger.info(f"last_chunk_time:[{self._stats['last_chunk_time']}], bytes_received:[{self._stats['bytes_received']}], chunks_received:[{self._stats['chunks_received']}] audio_data_len{len(audio_data)}")
 
                 # # 放入队列
                 # try:
